@@ -4,6 +4,11 @@ import os
 from pathlib import Path
 
 import streamlit as st
+
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
@@ -498,6 +503,189 @@ def respuesta_asistente(datos_cv, pregunta):
 
 
 # ============================================================
+# IA ONLINE (GROQ) + RESPALDO SEGURO
+# ============================================================
+
+MODELO_GROQ = "qwen/qwen3.6-27b"
+
+def perfil_para_ia(datos_cv):
+    """Devuelve solo información profesional útil; excluye datos de contacto y fecha de nacimiento."""
+    return {
+        "objetivo_laboral": {
+            "primer_empleo": limpio(datos_cv.get("objetivo", {}).get("primer_empleo")),
+            "trabajo_buscado": limpio(datos_cv.get("objetivo", {}).get("trabajo_buscado")),
+            "areas_interes": limpio(datos_cv.get("objetivo", {}).get("areas_interes")),
+            "modalidad": limpio(datos_cv.get("objetivo", {}).get("modalidad")),
+            "disponibilidad": limpio(datos_cv.get("objetivo", {}).get("disponibilidad")),
+            "jornada_completa": limpio(datos_cv.get("objetivo", {}).get("jornada_completa")),
+            "viajar": limpio(datos_cv.get("objetivo", {}).get("viajar")),
+            "mudarse": limpio(datos_cv.get("objetivo", {}).get("mudarse")),
+        },
+        "experiencias": [
+            {
+                "tipo": limpio(x.get("tipo")),
+                "puesto": limpio(x.get("puesto")),
+                "tareas": limpio(x.get("tareas")),
+                "herramientas": limpio(x.get("herramientas")),
+                "logros": limpio(x.get("logros")),
+            }
+            for x in datos_cv.get("experiencias", [])
+        ],
+        "educacion": [
+            {
+                "nivel": limpio(x.get("nivel")),
+                "titulo": limpio(x.get("titulo")),
+                "estado": limpio(x.get("estado")),
+            }
+            for x in datos_cv.get("educacion", [])
+        ],
+        "cursos": [
+            {
+                "nombre": limpio(x.get("nombre")),
+                "anio": limpio(x.get("anio")),
+            }
+            for x in datos_cv.get("cursos", [])
+        ],
+        "habilidades": {
+            "informaticas": datos_cv.get("habilidades", {}).get("informaticas", []),
+            "laborales": datos_cv.get("habilidades", {}).get("laborales", []),
+            "otras": limpio(datos_cv.get("habilidades", {}).get("otras")),
+        },
+        "idiomas": [
+            {
+                "idioma": limpio(x.get("idioma")),
+                "comprension": limpio(x.get("comprension")),
+                "escritura": limpio(x.get("escritura")),
+                "conversacion": limpio(x.get("conversacion")),
+            }
+            for x in datos_cv.get("idiomas", [])
+        ],
+        "licencia_conducir": limpio(datos_cv.get("personales", {}).get("licencia")),
+        "movilidad_propia": limpio(datos_cv.get("personales", {}).get("movilidad")),
+    }
+
+
+def clave_groq():
+    try:
+        return st.secrets["GROQ_API_KEY"]
+    except Exception:
+        return os.environ.get("GROQ_API_KEY", "")
+
+
+def consultar_ia_web(instruccion, consulta, max_tokens=900):
+    """Retorna (respuesta, True) si Groq responde; (None, False) para usar el respaldo local."""
+    api_key = clave_groq()
+    if Groq is None or not api_key:
+        return None, False
+    try:
+        cliente = Groq(api_key=api_key)
+        respuesta = cliente.chat.completions.create(
+            model=MODELO_GROQ,
+            messages=[
+                {"role": "system", "content": instruccion},
+                {"role": "user", "content": consulta},
+            ],
+            temperature=0.2,
+            max_completion_tokens=max_tokens,
+        )
+        texto = (respuesta.choices[0].message.content or "").strip()
+        return (texto, True) if texto else (None, False)
+    except Exception:
+        return None, False
+
+
+INSTRUCCION_IA = """
+Sos un asistente de orientación laboral y elaboración de currículum vitae. Respondé en español claro,
+profesional y útil. Debés basarte EXCLUSIVAMENTE en la información declarada en el perfil que recibís.
+Nunca inventes experiencia, estudios, títulos, cursos, habilidades, idiomas, certificaciones, logros ni datos personales.
+Si un requisito o capacidad no aparece en el perfil, indicá expresamente que no está declarado.
+Podés sugerir puestos, mejoras de redacción, palabras clave y próximos pasos, pero distinguí siempre una sugerencia
+de un dato real del usuario. No solicites ni uses datos sensibles innecesarios.
+""".strip()
+
+
+def analizar_perfil_ia(datos_cv):
+    perfil = json.dumps(perfil_para_ia(datos_cv), ensure_ascii=False, indent=2)
+    consulta = f"""
+Analizá este perfil laboral:
+{perfil}
+
+Entregá una respuesta breve y organizada con estos apartados:
+1. PERFIL PROFESIONAL
+2. FORTALEZAS DECLARADAS
+3. ASPECTOS A COMPLETAR O MEJORAR
+4. RECOMENDACIÓN PARA LA BÚSQUEDA LABORAL
+No agregues capacidades que no estén declaradas.
+"""
+    respuesta, uso_ia = consultar_ia_web(INSTRUCCION_IA, consulta)
+    return (respuesta if respuesta else analizar_perfil_seguro(datos_cv)), uso_ia
+
+
+def trabajos_recomendados_ia(datos_cv):
+    perfil = json.dumps(perfil_para_ia(datos_cv), ensure_ascii=False, indent=2)
+    consulta = f"""
+A partir únicamente de este perfil:
+{perfil}
+
+Proponé hasta 5 puestos o tipos de empleo razonables para buscar. Para cada uno explicá en una frase
+qué dato declarado del perfil respalda la recomendación. Después agregá palabras clave de búsqueda y
+una advertencia para revisar los requisitos reales de cada aviso. No afirmes que la persona cumple un
+requisito que no figure en el perfil.
+"""
+    respuesta, uso_ia = consultar_ia_web(INSTRUCCION_IA, consulta)
+    return (respuesta if respuesta else trabajos_recomendados(datos_cv)), uso_ia
+
+
+def analizar_oferta_ia(datos_cv, oferta):
+    if not (oferta or "").strip():
+        return "Pegá primero el texto de una oferta laboral para poder analizarla.", False
+    perfil = json.dumps(perfil_para_ia(datos_cv), ensure_ascii=False, indent=2)
+    consulta = f"""
+PERFIL DECLARADO:
+{perfil}
+
+OFERTA LABORAL:
+{oferta}
+
+Compará la oferta con el perfil. Indicá:
+- compatibilidad general (ALTA, MEDIA o BAJA) con una explicación prudente;
+- coincidencias comprobables;
+- requisitos que la oferta pide y que NO están declarados;
+- recomendación final para postularse o completar información.
+Nunca conviertas un requisito de la oferta en una habilidad del usuario.
+"""
+    respuesta, uso_ia = consultar_ia_web(INSTRUCCION_IA, consulta, max_tokens=1100)
+    return (respuesta if respuesta else analizar_oferta_seguro(datos_cv, oferta)), uso_ia
+
+
+def respuesta_asistente_ia(datos_cv, pregunta, historial=None):
+    q = (pregunta or "").strip()
+    if not q:
+        return "Escribí una consulta sobre tu CV, tu perfil, trabajos posibles o una oferta laboral.", False
+    perfil = json.dumps(perfil_para_ia(datos_cv), ensure_ascii=False, indent=2)
+    contexto = ""
+    if historial:
+        ultimos = historial[-6:]
+        contexto = "\
+".join(f"{rol}: {mensaje}" for rol, mensaje in ultimos)
+    consulta = f"""
+PERFIL PROFESIONAL DECLARADO:
+{perfil}
+
+CONTEXTO RECIENTE DEL CHAT:
+{contexto or 'Sin mensajes anteriores relevantes.'}
+
+CONSULTA DEL USUARIO:
+{q}
+
+Respondé de forma concreta y orientadora. Si la pregunta requiere un dato que no está en el perfil,
+decí que no está declarado en lugar de asumirlo.
+"""
+    respuesta, uso_ia = consultar_ia_web(INSTRUCCION_IA, consulta, max_tokens=850)
+    return (respuesta if respuesta else respuesta_asistente(datos_cv, q)), uso_ia
+
+
+# ============================================================
 # PDF
 # ============================================================
 
@@ -798,7 +986,7 @@ with st.sidebar:
     if logo:
         st.image(str(logo), width=105)
     st.markdown("## Asistente Laboral")
-    st.caption("Versión web")
+    st.caption("Versión web · IA online")
     pagina = st.radio(
         "Navegación",
         [
@@ -872,7 +1060,7 @@ if pagina == "Inicio":
     with c3:
         st.markdown('<div class="card"><div class="card-title">🤖 Orientación laboral</div><div class="card-text">Analizá tu perfil, descubrí trabajos posibles y compará tu información con una oferta laboral.</div></div>', unsafe_allow_html=True)
 
-    st.info("Los datos permanecen en la sesión actual del navegador. Las funciones de orientación usan únicamente la información declarada por la persona y no inventan experiencia, estudios ni habilidades.")
+    st.info("Los datos permanecen en la sesión actual del navegador. Para las funciones de IA se envía únicamente información profesional necesaria; no se envían correo, teléfono ni fecha de nacimiento. La aplicación mantiene un modo de respaldo si la IA online no está disponible.")
 
 elif pagina == "1. Datos personales":
     st.header("1. Datos personales")
@@ -1182,32 +1370,53 @@ elif pagina == "9. Vista previa y PDF":
 
 elif pagina == "10. Analizar perfil laboral":
     st.header("10. Analizar perfil laboral")
-    st.markdown('<div class="section-note">El análisis se construye únicamente con la información que cargaste en tu perfil.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-note">La IA analiza únicamente la información profesional que cargaste. Los datos de contacto y la fecha de nacimiento no se envían al modelo.</div>', unsafe_allow_html=True)
     if st.button("🔎 Analizar mi perfil", type="primary", use_container_width=True):
-        st.session_state["analisis_perfil_web"] = analizar_perfil_seguro(datos)
+        with st.spinner("Analizando tu perfil con IA..."):
+            resultado, uso_ia = analizar_perfil_ia(datos)
+        st.session_state["analisis_perfil_web"] = resultado
+        st.session_state["analisis_perfil_modo_ia"] = uso_ia
     if st.session_state.get("analisis_perfil_web"):
-        st.text_area("Resultado", st.session_state["analisis_perfil_web"], height=360, disabled=True)
+        if st.session_state.get("analisis_perfil_modo_ia"):
+            st.caption("✨ Análisis generado con IA online.")
+        else:
+            st.warning("La IA online no estuvo disponible. Se utilizó el análisis seguro de respaldo.")
+        st.text_area("Resultado", st.session_state["analisis_perfil_web"], height=420, disabled=True)
 
 elif pagina == "11. Trabajos recomendados":
     st.header("11. ¿Qué trabajos puedo buscar?")
-    st.markdown('<div class="section-note">Las recomendaciones se basan en tus intereses, experiencias y habilidades declaradas.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-note">La IA propone opciones a partir de tus intereses, experiencias y habilidades declaradas, sin inventar conocimientos.</div>', unsafe_allow_html=True)
     if st.button("💼 Ver trabajos recomendados", type="primary", use_container_width=True):
-        st.session_state["trabajos_web"] = trabajos_recomendados(datos)
+        with st.spinner("Buscando opciones compatibles con tu perfil..."):
+            resultado, uso_ia = trabajos_recomendados_ia(datos)
+        st.session_state["trabajos_web"] = resultado
+        st.session_state["trabajos_modo_ia"] = uso_ia
     if st.session_state.get("trabajos_web"):
-        st.text_area("Resultado", st.session_state["trabajos_web"], height=360, disabled=True)
+        if st.session_state.get("trabajos_modo_ia"):
+            st.caption("✨ Recomendaciones generadas con IA online.")
+        else:
+            st.warning("La IA online no estuvo disponible. Se utilizaron las recomendaciones de respaldo.")
+        st.text_area("Resultado", st.session_state["trabajos_web"], height=440, disabled=True)
 
 elif pagina == "12. Analizar oferta laboral":
     st.header("12. Analizar una oferta laboral")
-    st.markdown('<div class="section-note">Pegá el texto de una oferta. La aplicación comparará sus requisitos con tu perfil sin afirmar que poseés conocimientos que no declaraste.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-note">Pegá el texto de una oferta. La IA comparará sus requisitos con tu perfil y marcará como no declarado aquello que no figure en tus datos.</div>', unsafe_allow_html=True)
     oferta = st.text_area("Texto de la oferta laboral", height=260, placeholder="Pegá acá la publicación o los requisitos del puesto...")
     if st.button("🧾 Analizar oferta", type="primary", use_container_width=True):
-        st.session_state["oferta_web"] = analizar_oferta_seguro(datos, oferta)
+        with st.spinner("Comparando la oferta con tu perfil..."):
+            resultado, uso_ia = analizar_oferta_ia(datos, oferta)
+        st.session_state["oferta_web"] = resultado
+        st.session_state["oferta_modo_ia"] = uso_ia
     if st.session_state.get("oferta_web"):
-        st.text_area("Resultado del análisis", st.session_state["oferta_web"], height=430, disabled=True)
+        if st.session_state.get("oferta_modo_ia"):
+            st.caption("✨ Oferta analizada con IA online.")
+        elif oferta.strip():
+            st.warning("La IA online no estuvo disponible. Se utilizó el análisis seguro de respaldo.")
+        st.text_area("Resultado del análisis", st.session_state["oferta_web"], height=500, disabled=True)
 
 elif pagina == "13. Asistente laboral":
-    st.header("13. Asistente laboral")
-    st.markdown('<div class="section-note">Consultá sobre tu CV, tu perfil o los tipos de trabajos que podrías buscar. Esta versión utiliza únicamente los datos cargados en la sesión.</div>', unsafe_allow_html=True)
+    st.header("13. Asistente laboral con IA")
+    st.markdown('<div class="section-note">Consultá sobre tu CV, tu perfil, trabajos posibles o una oferta. El asistente recibe solo la información profesional necesaria y tiene prohibido inventar antecedentes.</div>', unsafe_allow_html=True)
     if "chat_web" not in st.session_state:
         st.session_state.chat_web = []
     for rol, mensaje in st.session_state.chat_web:
@@ -1215,8 +1424,16 @@ elif pagina == "13. Asistente laboral":
             st.write(mensaje)
     pregunta = st.chat_input("Escribí tu consulta laboral...")
     if pregunta:
+        historial_previo = list(st.session_state.chat_web)
         st.session_state.chat_web.append(("user", pregunta))
-        respuesta = respuesta_asistente(datos, pregunta)
+        with st.spinner("Pensando..."):
+            respuesta, uso_ia = respuesta_asistente_ia(datos, pregunta, historial_previo)
         st.session_state.chat_web.append(("assistant", respuesta))
+        st.session_state["chat_modo_ia"] = uso_ia
         st.rerun()
-    st.caption("La conexión con un modelo de IA alojado en Internet se incorporará en la etapa de publicación. La versión local con Ollama permanece sin cambios.")
+    if st.session_state.get("chat_web"):
+        if st.session_state.get("chat_modo_ia"):
+            st.caption("✨ Asistente conectado a IA online.")
+        else:
+            st.caption("Modo de respaldo activo: respuestas basadas en reglas seguras del perfil.")
+

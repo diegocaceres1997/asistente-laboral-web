@@ -105,6 +105,100 @@ st.markdown(
             font-weight: 700;
         }}
         div.stDownloadButton > button:hover {{ color: white; border: 0; }}
+
+        /* Ajustes generales de legibilidad */
+        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
+        h1, h2, h3 {{
+            color: #1B304A !important;
+        }}
+
+        /* Mejoras responsive para celulares y tablets */
+        @media (max-width: 768px) {{
+            .block-container {{
+                max-width: 100%;
+                padding-top: 0.8rem;
+                padding-left: 0.9rem;
+                padding-right: 0.9rem;
+                padding-bottom: 2rem;
+            }}
+
+            .hero {{
+                padding: 18px 18px;
+                border-radius: 15px;
+                margin-bottom: 14px;
+            }}
+
+            .hero-title {{
+                font-size: 1.72rem;
+                line-height: 1.12;
+                margin-bottom: 10px;
+            }}
+
+            .hero-subtitle {{
+                font-size: 0.98rem;
+                line-height: 1.55;
+            }}
+
+            .card {{
+                min-height: auto;
+                padding: 16px;
+                margin-bottom: 10px;
+            }}
+
+            .card-title {{
+                font-size: 1rem;
+                line-height: 1.3;
+            }}
+
+            .card-text {{
+                font-size: 0.93rem;
+                line-height: 1.5;
+            }}
+
+            .section-note {{
+                padding: 11px 12px;
+                font-size: 0.94rem;
+            }}
+
+            section.main div[data-testid="stImage"] img {{
+                width: 88px !important;
+                max-width: 88px !important;
+                height: auto !important;
+            }}
+
+            div[data-testid="stHorizontalBlock"] {{
+                gap: 0.75rem;
+            }}
+
+            div.stButton > button,
+            div.stDownloadButton > button {{
+                min-height: 46px;
+                font-size: 0.98rem;
+            }}
+
+            textarea, input {{
+                font-size: 16px !important;
+            }}
+
+            .institutional {{
+                font-size: 0.82rem;
+            }}
+        }}
+
+        @media (max-width: 480px) {{
+            .hero-title {{
+                font-size: 1.48rem;
+            }}
+
+            .hero-subtitle {{
+                font-size: 0.94rem;
+            }}
+
+            .block-container {{
+                padding-left: 0.7rem;
+                padding-right: 0.7rem;
+            }}
+        }}
     </style>
     """,
     unsafe_allow_html=True,

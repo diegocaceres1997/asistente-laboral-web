@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 from pathlib import Path
 
 import streamlit as st
@@ -589,6 +590,20 @@ def consultar_ia_web(instruccion, consulta, max_tokens=900):
             max_completion_tokens=max_tokens,
         )
         texto = (respuesta.choices[0].message.content or "").strip()
+
+        # Algunos modelos de razonamiento pueden incluir su proceso interno
+        # entre etiquetas <think>...</think>. Ese contenido no se muestra
+        # al usuario: conservamos únicamente la respuesta final.
+        texto = re.sub(
+            r"<think\b[^>]*>.*?</think>",
+            "",
+            texto,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).strip()
+
+        # Protección adicional por si quedara alguna etiqueta suelta.
+        texto = re.sub(r"</?think\b[^>]*>", "", texto, flags=re.IGNORECASE).strip()
+
         return (texto, True) if texto else (None, False)
     except Exception:
         return None, False
@@ -601,6 +616,8 @@ Nunca inventes experiencia, estudios, títulos, cursos, habilidades, idiomas, ce
 Si un requisito o capacidad no aparece en el perfil, indicá expresamente que no está declarado.
 Podés sugerir puestos, mejoras de redacción, palabras clave y próximos pasos, pero distinguí siempre una sugerencia
 de un dato real del usuario. No solicites ni uses datos sensibles innecesarios.
+No muestres razonamientos internos, procesos de pensamiento, etiquetas <think> ni explicaciones sobre cómo llegaste
+a la respuesta. Entregá únicamente la respuesta final destinada al usuario.
 """.strip()
 
 
@@ -1436,4 +1453,3 @@ elif pagina == "13. Asistente laboral":
             st.caption("✨ Asistente conectado a IA online.")
         else:
             st.caption("Modo de respaldo activo: respuestas basadas en reglas seguras del perfil.")
-

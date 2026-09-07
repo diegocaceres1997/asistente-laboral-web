@@ -508,6 +508,7 @@ def respuesta_asistente(datos_cv, pregunta):
 # ============================================================
 
 MODELO_GROQ = "qwen/qwen3.6-27b"
+MODELO_RESPALDO_GROQ = "llama-3.1-8b-instant"
 
 def perfil_para_ia(datos_cv):
     """Devuelve solo información profesional útil; excluye datos de contacto y fecha de nacimiento."""
@@ -574,39 +575,60 @@ def clave_groq():
 
 
 def consultar_ia_web(instruccion, consulta, max_tokens=900):
-    """Retorna (respuesta, True) si Groq responde; (None, False) para usar el respaldo local."""
+    """Retorna (respuesta, True) si Groq responde; (None, False) si debe usarse el respaldo seguro."""
     api_key = clave_groq()
     if Groq is None or not api_key:
         return None, False
+
+    # Groq recomienda para Qwen ocultar explícitamente el razonamiento.
+    # Además, las instrucciones se envían dentro del mensaje del usuario para
+    # evitar que el modelo exponga contenido de razonamiento.
+    prompt_completo = f"""{instruccion}
+
+CONSULTA DEL USUARIO:
+{consulta}
+
+Respondé únicamente con la respuesta final en español. No incluyas etiquetas <think>, razonamientos internos ni análisis paso a paso."""
+
+    cliente = Groq(api_key=api_key)
+
+    # 1) Modelo principal: Qwen en modo NO THINKING / razonamiento oculto.
     try:
-        cliente = Groq(api_key=api_key)
         respuesta = cliente.chat.completions.create(
             model=MODELO_GROQ,
-            messages=[
-                {"role": "system", "content": instruccion},
-                {"role": "user", "content": consulta},
-            ],
-            temperature=0.2,
+            messages=[{"role": "user", "content": prompt_completo}],
+            temperature=0.7,
+            top_p=0.8,
+            max_completion_tokens=max_tokens,
+            reasoning_format="hidden",
+            reasoning_effort="none",
+        )
+        texto = (respuesta.choices[0].message.content or "").strip()
+        texto = re.sub(r"<think\b[^>]*>.*?</think>", "", texto, flags=re.DOTALL | re.IGNORECASE).strip()
+        texto = re.sub(r"</?think\b[^>]*>", "", texto, flags=re.IGNORECASE).strip()
+        if texto:
+            return texto, True
+    except Exception:
+        pass
+
+    # 2) Respaldo online: modelo de producción sin modo de razonamiento visible.
+    # Esto evita que una incompatibilidad puntual de Qwen deje sin IA a la app.
+    try:
+        respuesta = cliente.chat.completions.create(
+            model=MODELO_RESPALDO_GROQ,
+            messages=[{"role": "user", "content": prompt_completo}],
+            temperature=0.4,
             max_completion_tokens=max_tokens,
         )
         texto = (respuesta.choices[0].message.content or "").strip()
-
-        # Algunos modelos de razonamiento pueden incluir su proceso interno
-        # entre etiquetas <think>...</think>. Ese contenido no se muestra
-        # al usuario: conservamos únicamente la respuesta final.
-        texto = re.sub(
-            r"<think\b[^>]*>.*?</think>",
-            "",
-            texto,
-            flags=re.DOTALL | re.IGNORECASE,
-        ).strip()
-
-        # Protección adicional por si quedara alguna etiqueta suelta.
+        texto = re.sub(r"<think\b[^>]*>.*?</think>", "", texto, flags=re.DOTALL | re.IGNORECASE).strip()
         texto = re.sub(r"</?think\b[^>]*>", "", texto, flags=re.IGNORECASE).strip()
-
-        return (texto, True) if texto else (None, False)
+        if texto:
+            return texto, True
     except Exception:
-        return None, False
+        pass
+
+    return None, False
 
 
 INSTRUCCION_IA = """
